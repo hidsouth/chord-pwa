@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Survey Chord Diagram</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f8f8f8;
+      overflow: hidden;
+    }
+    #chart-container {
+      width: 100vw;
+      height: 100vh;
+      background: white;
+    }
+    #chart {
+      width: 100%;
+      height: 100%;
+    }
+    .tooltip {
+      position: absolute;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      border-radius: 4px;
+      pointer-events: none;
+      font-size: 10px;
+      max-width: 300px;
+      z-index: 99;
+    }
+    #toggle-controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 11;
+      background: #333;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    #toggle-controls:hover {
+      background: #555;
+    }
+    #header-controls {
+      position: absolute;
+      top: 50px;
+      left: 10px;
+      right: 10px;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 10px;
+      border: 1px solid #ccc;
+      display: none;
+      z-index: 10;
+    }
+    #controls button {
+      margin-top: 5px;
+      margin-right: 10px;
+    }
+  </style>
+</head>
+<body>
+  <button id="toggle-controls">☰ Controls</button>
+  <div id="header-controls">
+    <h1>Architectural Survey Connections</h1>
+    <div id="controls">
+      <input type="file" id="csv-file" accept=".csv">
+      <div id="status">Please upload your survey CSV file</div>
+      <br />
+      <button id="reset-zoom">Reset Zoom</button>
+      <button id="toggle-panning">Disable Panning</button>
+      <button id="reset-pan">Reset Panning</button>
+    </div>
+  </div>
+
+  <div id="chart-container">
+    <svg id="chart"></svg>
+    <div class="tooltip" style="opacity: 0;"></div>
+  </div>
+
+  <script>
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const innerRadius = 420;
+    const outerRadius = 440;
+
+    let panningEnabled = true;
+    let currentTransform = d3.zoomIdentity.translate(width / 2, height / 2).scale(1);
+
+    const svg = d3.select("#chart")
+      .attr("width", width)
+      .attr("height", height);
+
+    const container = svg.append("g")
+      .attr("id", "zoom-group")
+      .attr("transform", currentTransform);
+
+    const zoom = d3.zoom()
+      .scaleExtent([0.4, 3])
+      .on("zoom", (event) => {
+        if (!panningEnabled) return;
+        currentTransform = event.transform;
+        container.attr("transform", currentTransform);
+      });
+
+    svg.call(zoom);
+
+    function fitToScreen() {
+      const bbox = container.node().getBBox();
+      const scale = 0.85 / Math.max(bbox.width / width, bbox.height / height);
+      const x = width / 2 - (bbox.x + bbox.width / 2) * scale;
+      const y = height / 2 - (bbox.y + bbox.height / 2) * scale;
+      currentTransform = d3.zoomIdentity.translate(x, y).scale(scale);
+      svg.transition().duration(750).call(zoom.transform, currentTransform);
+    }
+
+    document.getElementById("reset-zoom").addEventListener("click", fitToScreen);
+    document.getElementById("toggle-panning").addEventListener("click", function () {
+      panningEnabled = !panningEnabled;
+      this.textContent = panningEnabled ? "Disable Panning" : "Enable Panning";
+    });
+    document.getElementById("reset-pan").addEventListener("click", () => {
+      const scale = currentTransform.k;
+      currentTransform = d3.zoomIdentity.translate(width / 2, height / 2).scale(scale);
+      svg.transition().duration(500).call(zoom.transform, currentTransform);
+    });
+
+    document.getElementById("toggle-controls").addEventListener("click", () => {
+      const panel = document.getElementById("header-controls");
+      panel.style.display = panel.style.display === "block" ? "none" : "block";
+    });
+
+    document.getElementById('csv-file').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      document.getElementById("status").textContent = "Loading file...";
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const csvData = d3.csvParse(e.target.result);
+          processTransposedData(csvData);
+        } catch (error) {
+          document.getElementById("status").textContent = "Error parsing CSV";
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    function processTransposedData(rawData) {
+      container.selectAll("*").remove();
+      document.getElementById("status").textContent = "Processing data...";
+
+      const people = rawData.columns.slice(1);
+      const answers = [];
+      const answerIndexMap = {};
+
+      rawData.forEach(row => {
+        const question = row[rawData.columns[0]];
+        people.forEach(person => {
+          const answer = row[person];
+          if (answer && answer.trim() !== "") {
+            const fullAnswer = `${question}: ${answer}`;
+            if (!answerIndexMap[fullAnswer]) {
+              answerIndexMap[fullAnswer] = answers.length;
+              answers.push(fullAnswer);
+            }
+          }
+        });
+      });
+
+      const connections = [];
+      rawData.forEach(row => {
+        const question = row[rawData.columns[0]];
+        people.forEach((person, i) => {
+          const answer = row[person];
+          if (answer && answer.trim() !== "") {
+            const fullAnswer = `${question}: ${answer}`;
+            connections.push([i, answerIndexMap[fullAnswer], 1]);
+          }
+        });
+      });
+
+      const spacer = [""];
+      const allGroups = [...people, ...spacer, ...answers];
+      const matrixSize = allGroups.length;
+      const matrix = Array(matrixSize).fill().map(() => Array(matrixSize).fill(0));
+      const answerOffset = people.length + spacer.length;
+
+      connections.forEach(([personIdx, answerIdx, strength]) => {
+        const targetIdx = answerOffset + answerIdx;
+        matrix[personIdx][targetIdx] = strength;
+        matrix[targetIdx][personIdx] = strength;
+      });
+
+      createChordDiagram(allGroups, matrix, people.length, answerOffset);
+      fitToScreen();
+      document.getElementById("status").textContent =
+        `Showing ${people.length} people connected to ${answers.length} answers`;
+    }
+
+    function createChordDiagram(groups, matrix, peopleLength, answerOffset) {
+      const chord = d3.chord().padAngle(0.03).sortSubgroups(d3.descending);
+      const chords = chord(matrix);
+      const arc = d3.arc().innerRadius(innerRadius).outerRadius(outerRadius);
+      const ribbon = d3.ribbon().radius(innerRadius - 20); // ← gap added
+
+      const interpolate = d3.interpolateRgb.gamma(2.2);
+      const peopleColor = (i) => {
+        const t = i / Math.max(1, peopleLength - 1);
+        return t < 0.5
+          ? interpolate("blue", "gold")(t * 2)
+          : interpolate("gold", "red")((t - 0.5) * 2);
+      };
+
+      const answerColor = (i) => {
+        const t = i / Math.max(1, groups.length - answerOffset - 1);
+        const bright = t < 0.5
+          ? d3.hsl(interpolate("blue", "gold")(t * 2))
+          : d3.hsl(interpolate("gold", "red")((t - 0.5) * 2));
+        bright.l *= 0.45;
+        return bright.toString();
+      };
+
+      const color = (i) => {
+        if (i < peopleLength) return peopleColor(i);
+        if (i >= answerOffset) return answerColor(i - answerOffset);
+        return "transparent";
+      };
+
+      const group = container.append("g")
+        .selectAll("g")
+        .data(chords.groups)
+        .join("g");
+
+      group.append("path")
+        .attr("d", arc)
+        .attr("fill", d => color(d.index));
+
+      group.append("text")
+        .attr("dy", ".35em")
+        .attr("transform", function(d) {
+          const angle = (d.startAngle + d.endAngle) / 2;
+          return `
+            rotate(${angle * 180 / Math.PI - 90})
+            translate(${outerRadius + 20})
+            rotate(${angle > Math.PI ? 180 : 0})
+          `;
+        })
+        .attr("text-anchor", d => ((d.startAngle + d.endAngle) / 2 > Math.PI ? "end" : "start"))
+        .text(d => {
+          const label = groups[d.index];
+          if (label === "") return "";
+          if (d.index < peopleLength) return label;
+          return (label.split(":")[1] || label).trim();
+        })
+        .style("font-size", "7px")
+        .style("font-weight", d => d.index < peopleLength ? "bold" : "normal")
+        .style("fill", "black") // ← black labels
+        .style("opacity", d => groups[d.index] === "" ? 0 : 1);
+
+      const ribbons = container.append("g")
+        .selectAll("path")
+        .data(chords)
+        .join("path")
+        .attr("d", ribbon)
+        .attr("fill", d => color(d.source.index))
+        .attr("stroke", d => d3.color(color(d.source.index)).darker(0.5))
+        .style("opacity", 0.7);
+
+      let selectedChord = null;
+      ribbons.on("click", function(event, clickedChord) {
+        selectedChord = selectedChord === clickedChord ? null : clickedChord;
+        ribbons.style("opacity", d => !selectedChord || d === clickedChord ? 1 : 0.05);
+      });
+
+      ribbons.on("mouseover", function(event, d) {
+        const source = groups[d.source.index];
+        const target = groups[d.target.index];
+        d3.select(".tooltip")
+          .html(`<strong>Connection:</strong><br>${source}<br>↔<br>${target}`)
+          .style("opacity", 1)
+          .style("left", (event.pageX + 10) + "px")
+          .style("top", (event.pageY - 28) + "px");
+        d3.select(this).style("opacity", 1);
+      }).on("mouseout", function() {
+        d3.select(".tooltip").style("opacity", 0);
+        if (selectedChord !== this.__data__) {
+          d3.select(this).style("opacity", 0.7);
+        }
+      });
+    }
+  </script>
+</body>
+</html>
