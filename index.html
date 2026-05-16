@@ -3,173 +3,438 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Survey Chord Diagram</title>
+  <title>Chord Diagram Multi-Select + Export</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      background: #f8f8f8;
-      overflow: hidden;
-    }
-    #chart-container {
-      width: 100vw;
-      height: 100vh;
-      background: white;
-    }
-    #chart {
-      width: 100%;
-      height: 100%;
-    }
-    .tooltip {
-      position: absolute;
-      padding: 8px;
-      background: rgba(0, 0, 0, 0.9);
-      color: white;
-      border-radius: 4px;
-      pointer-events: none;
-      font-size: 10px;
-      max-width: 300px;
-      z-index: 99;
-    }
-    #toggle-controls {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 11;
-      background: #333;
-      color: white;
-      border: none;
-      padding: 6px 12px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    #toggle-controls:hover {
-      background: #555;
-    }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { font-family: Arial, sans-serif; background: #f8f8f8; }
+    #chart-container { position: fixed; inset: 0; width: 100vw; height: 100vh; background: white; }
+    #chart { display: block; width: 100vw; height: 100vh; }
+    #toggle-controls { position: absolute; top: 10px; left: 10px; z-index: 10; }
     #header-controls {
-      position: absolute;
-      top: 50px;
-      left: 10px;
-      right: 10px;
-      background: rgba(255, 255, 255, 0.95);
-      padding: 10px;
+      position: absolute; top: 50px; left: 10px; background: #fff;
+      padding: 10px; border: 1px solid #ccc; display: none; z-index: 10;
+      max-width: min(95vw, 600px); max-height: 90vh; overflow-y: auto;
+    }
+    #status { margin-top: 6px; font-size: 12px; color: #333; }
+    label { display: inline-block; margin-top: 4px; }
+    select, input[type="number"] { margin-left: 6px; }
+    button { margin-top: 8px; margin-right: 8px; }
+
+    details.control-section {
+      margin-top: 10px;
       border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 6px 8px;
+      background: #fafafa;
+    }
+    details.control-section summary {
+      cursor: pointer;
+      font-weight: bold;
+      user-select: none;
+    }
+    details.control-section > div {
+      margin-top: 8px;
+    }
+    #info-popup {
+      position: absolute;
       display: none;
-      z-index: 10;
+      z-index: 20;
+      max-width: min(360px, 90vw);
+      max-height: 55vh;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.92);
+      border: 1px solid #555;
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.35;
+      color: #fff;
     }
-    #controls button {
-      margin-top: 5px;
-      margin-right: 10px;
+    #info-popup h2 { margin: 0 22px 8px 0; font-size: 15px; }
+    #info-popup .close-popup {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      border: 0;
+      background: transparent;
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+      margin: 0;
     }
+    #info-popup .detail { margin: 6px 0; }
+    #info-popup .detail strong, #info-popup li strong { display: block; color: #bdbdbd; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    #info-popup ul { margin: 6px 0 0 18px; padding: 0; }
+    #info-popup li { margin-bottom: 5px; }
   </style>
 </head>
 <body>
   <button id="toggle-controls">☰ Controls</button>
   <div id="header-controls">
-    <h1>Architectural Survey Connections</h1>
-    <div id="controls">
-      <input type="file" id="csv-file" accept=".csv">
-      <div id="status">Please upload your survey CSV file</div>
-      <br />
-      <button id="reset-zoom">Reset Zoom</button>
-      <button id="toggle-panning">Disable Panning</button>
-      <button id="reset-pan">Reset Panning</button>
-    </div>
+    <h1 style="margin:0 0 8px 0;">Controls</h1>
+    <input type="file" id="csv-file" accept=".csv">
+    <div id="status">Loading embedded CSV...</div>
+    <br/>
+    <label>People Colors:
+      <select id="people-colors">
+        <option value="purple-lightblue">Purple → Light Blue</option>
+        <option value="orange-yellow">Orange → Yellow</option>
+        <option value="blue-green">Blue → Green</option>
+      </select>
+    </label>
+    <br/>
+    <label>Answer Colors:
+      <select id="answer-colors">
+        <option value="dark">Darker variant</option>
+        <option value="pastel">Pastel</option>
+        <option value="contrast">High contrast</option>
+      </select>
+    </label>
+    <br/>
+    <label>Ribbon Offset:
+      <input type="number" id="ribbon-offset" value="20" min="0" max="200"> px
+    </label>
+    <br/>
+    <label>Ribbon Stroke Width:
+      <input type="number" id="ribbon-width" value="1.5" min="0.5" max="10" step="0.5"> px
+    </label>
+    <br/>
+    <details class="control-section">
+      <summary>Show/Hide People</summary>
+      <div id="people-checkboxes"></div>
+    </details>
+    <br/>
+    <button id="apply-style">Apply</button>
+    <button id="clear-selection">Clear Selection</button>
+    <details class="control-section">
+      <summary>Selections</summary>
+      <div id="selection-list">No selections yet.</div>
+    </details>
+    <button id="reset-zoom">Reset Pan / Zoom</button>
+    <br/><br/>
+    <button id="export-svg">Export SVG</button>
+    <button id="export-png">Save as PNG</button>
+  </div>
+
+  <div id="info-popup" role="dialog" aria-live="polite">
+    <button class="close-popup" type="button" aria-label="Close popup">×</button>
+    <div id="popup-content"></div>
   </div>
 
   <div id="chart-container">
     <svg id="chart"></svg>
-    <div class="tooltip" style="opacity: 0;"></div>
   </div>
 
   <script>
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    const innerRadius = 420;
-    const outerRadius = 440;
+    const embeddedCsv = "What is your Name?,Amata Luphaiboon,Anna Maria Sy-Lawrence,Annabelle Bermejo,Arts Serrano,Aya Maceda,Benjamin Mendoza,Bianca Weeko Martin,Bryan Darryl Liangco,Buck sia,Carlo Calma,Charlotte Lao Schmidt,Christian Tenefrancia Illi,Clarisse Gono,Daryl Refuerzo,Dominic Galicia,Edwin Uy,Gabriel Schmid,JJ Acuna,Jason Buensalido,Jasper Niens,Jorge Yulo,Justin Guiab,Keshia Lim,Laurence Angeles,Mark Andrew Sy,Micaela Benedicto,Neil John Bersabe,Ray Villanueva,Rhalf Jimn L. Abne,Ric Atienza,Ronnie Yumang,Sudarshan Khadka\nWhere were you born?,\"Bangkok, THA\",\"Manila, PHL\",Roxas City Capiz,\"Manila, PHL\",\"Quezon City, PHL\",\"Manila, PHL\",\"Jakarta, Indonesia\",PHL,\"Cebu City, PHL\",\"Makati City, PHL\",\"Dueren, DEU\",\"Stuttgart, DEU\",\"Quezon City, PHL\",\"Vigan City, PHL\",\"Manila, PHL\",\"Cagayan de Oro, PHL\",\"Zurich, CHE\",,\"Manila, PHL\",Almelo / The NLD,\"Manila, PHL\",\"Quezon City, PHL\",\"Cebu City, PHL\",\"Quezon City, PHL\",\"Manila, PHL\",\"Manila, PHL\",\"Davao City, PHL\",\"West Virigina, USA\",PHL,\"Gorssel, NLD\",\"Quezon City, PHL\",\"Quezon City, PHL\"\nWhat year were you born?,1969,1962,1985,1988,1978,1984,1996,1991,1980,1981,1982,1987,1993,1990,1965,1978,1994,,1981,1980,1961,1990,1992,1985,1990,1977,1992,1982,1994,1977,1970,1986\nWhere do you currently reside?,\"Bangkok, THA\",\"Manila, PHL\",\"Las Pi\u00f1as, PHL\",\"Manila, PHL\",\"Quezon City, PHL\",\"Manila, PHL\",\"Toronto, CAN\",\"Quezon City, PHL\",\"Mandaue City, PHL\",\"Makati City, PHL\",\"Bohol, PHL\",\"Berlin, DEU & Bacolod, PHL\",\"Quezon City, PHL\",\"Cainta, Rizal, PHL\",\"Makati City, PHL\",\"Neuhausen am Rheinfall, CHE\",\"Lisbon, PRT\",\"Manila, PHL\",\"Taguig, Metro Manila, PHL\",\"Rotterdam, NLD\",\"Makati City, PHL\",\"El Nido, Palawan, PHL\",\"Cebu City, PHL\",\"Davao City, PHL\",\"Quezon City, PHL\",\"Makati City, PHL\",\"Davao City, PHL\",\"Negros Oriental, PHL\",\"Negros Oriental, PHL\",\"Bantayan, PHL\",\"Alfonso, Cavite, PHL\",\"Manila, PHL\"\nWhere are other places you have lived?,\"Bangkok, THA\",\"Hong kong, CHN; Tokyo, JPN; New York, USA;Los Angeles, USA;\",,\"Caloocan, PHL; Makati, PHL; Manila, PHL\",\"Singapore; Sydney, AUS; New York, USA\",,\"Bali, IDN; Melbourne, AUS; Mexico, MEX; New York, USA; Prague, CZE\",,,\"London, GBR\",\"Berlin, DEU;Paris, FRA; Brussels, BEL\",\"Stuttgart, DEU; Munich, DEU; Karlsruhe, DEU; Barcelona, ESP; Edinburgh, GBR;\",\"Beijing, CHN\",,\"Indiana, USA; Rome, ITA; New York, USA\",\"Neuhausen am Rheinfall, CHE\",\"New York, USA; Providence, USA; Lisbon, PRT\",\"Hong Kong, CHN\",\"Saijo City, JPN\",\"Bantayan, PHL; Davao, PHL;\",\"Connecticut, USA; Massachusetts, USA; New York, USA\",,\"Arnhem, GBR\",\"Singapore, SGP; Zurich, CHE; Sao Paolo, BRA\",,\"Connecticut, USA\",THA,\"Seatle, USA; Washington, USA; Cumberland, USA;\",\"Shanghai, CHN\",,\"Los Angeles, USA\",\"Ho Chi Minh, VNM; Venice, ITA; Norway, NOR\"\nWhat is/are your citizenship?,Thai;,Filipino;,Filipino;,Filipino;,\"Filipino;Australian, American;\",Filipino;,Filipino;Canadian;,Filipino;,Filipino;,Filipino;,Filipino;German;,Filipino;German;,Filipino;,Filipino;,Filipino;American,Filipino;,Filipino;swiss;,Filipino;,Filipino;,NLD;,Filipino;,Filipino;,Filipino;,Filipino;,Filipino;,Filipino;,Filipino;,Filipino;American;,Filipino;,Filipino;Dutch;,Filipino;,Filipino;\nWhat undergraduate degree did you obtain?,Bach. Arch,Bachelor of Arts;,Bach. Science Arch;,Bach. Science Arch;,Bach. Science Arch;,Bach. Science Arch;,Bach. Arch,Bach. Science Arch;,Bach. Science Arch;,Bachelor of Architecture;,Vordiplom Architektur;,FA,Bach. Science Arch;,Bach. Science Arch;,Bachelor of Architecture;,Bach. Science Arch;,Bach. Arch; Bach. Arts,Bach. Science Arch;,Bach. Science Arch;,Bach. Arts,Bach. Liberal Arts;,Bach. Science Arch;,Bach. Science Arch;,Bach. Science Arch;,Bach. Science Arch;,Bach. Science Arch;,Bach. Science Arch;,Bach. Science Arch;,Bach. Science Arch;,N/A;,Bach. Science Arch;,Bach. Science Arch;\nWhere did you receive your undergraduate degree?,\"Chulalongkorn Univ., THA\",\"Barnard College, Columbia Univ.\",Univ. of Santo Tomas,Univ. of Santo Tomas,Univ. of the PHL,Univ. of Santo Tomas,Univ. of Waterloo,Univ. of Santo Tomas,Bachelor of Science in Architecture,Architectural Association,TU Braunschweig,Academy of Fine Arts Munich,Univ. of Santo Tomas,Univ. of the PHL - Diliman,\"Univ. of Notre Dame, Notre Dame, Indiana, USA\",\"Univ. of Santo Tomas, Manila, PHL\",Rhode Island School of Design,Cornell Univ.,\"Univ. of Santo Tomas, PHL\",\"Zwolle, NLD\",Hampshire College,\"Univ. of the PHL, Diliman\",Univ. of San Carlos,Univ. of the PHL,Univ. of Santo Tomas,Univ. of the PHL,Ateneo de Davao Univ.,Univ. of Maryland,Mapua Intitute of Technology,,Polytechnic Univ. of the PHL,\"Univ. of the PHL, Diliman\"\nWhen did you receive your undergraduate degree?,1992,1984,2007,2010,2000,2007,2019,2013,2002,2009,2006,2017,2013,1990,1988,1999,2019,2005,2003,1997,1985,2015,2016,2008,2013,1999,2014,2005,2014,1996,1992,2009\nWhat graduate/postgraduate degree did you obtain?,Master's Degree ;,Master's Degree ;Masters in Arch,Master Strategic Design of Spaces ;,,Master's Degree ;,Master's Degree ;,Master's Degree ;,,,,Diplom-Ingenieur in Architektur;,Fine Arts Diploma ;,Master's Degree ;,,,Master's Degree ;,Master's Degree ;,Master's Degree ;,Master's Degree ;,,Master's Degree ;,,Master's Degree ;,Master's Degree ;,,,Master's Degree ;,Master's Degree ;,,,Master's Degree ;,\nWhere did you receive your postgraduate degree?,Univ. of Washington; Harvard Univ.,Harvard Univ.,Instituto de Impresa,,\"Columbia Univ., GSAPP\",Univ. of Sydney,Univ. of Waterloo,,,not applicable,TU Braunschweig,Academy of Fine Arts Munich,Tsinghua Univ..,,,Hong Kong Polytechnic Univ.,Harvard Graduate School of Design,Columbia Univ.,Ateneo De Manila Graduate School of Business,\"AKI Academy of the Arts, Enschede\",Rensselaer Polytechnic Institute  & Asian Institute of Management,,Bartlett School of Architecture,ETH Swiss Federal Institute of Technology Zurich,,N.A.,Institute for advanced architecture of catalonia,\"Univ. of Washington, Seattle\",None,,,\nWhen did you receive your graduate/postgraduate degree?,1995,1989,2008,,2013,2022,2022,,,,2010,2017,2021,,,2018,2024,2005,2014,2001,1993,2025,2019,2012,,,2022,2007,,,,\nWhat types of projects do you work on?,Residential ;Commercial ;Institutional ;Interior Design;Industrial ;Landscape architecture;,Residential ;Commercial ;Institutional ;Interior Design;,Residential ;Institutional ;Interior Design;,\"Residential ;Commercial ;Institutional ;Master planning, regional planning, etc.;Interior Design;\",\"Residential ;Commercial ;Institutional ;Master planning, regional planning, etc.;Interior Design;\",\"Residential ;Commercial ;Institutional ;Master planning, regional planning, etc.;Landscape architecture;Interior Design;\",Institutional ;Interior Design;,Residential ;Commercial ;Hospitality;,Residential ;Commercial ;Institutional ;Interior Design;,Residential ;Commercial ;Institutional ;Landscape architecture;Interior Design;,\"Residential ;Commercial ;Institutional ;Industrial ;Master planning, regional planning, etc.;Landscape architecture;Interior Design;Scenography, Art Direction, Publishing, Illustration, Process Design and Facilitation;\",\"Residential ;Commercial ;Institutional ;Master planning, regional planning, etc.;Landscape architecture;Art in Architecture, Urbanism;\",\"Residential ;Commercial ;Master planning, regional planning, etc.;Interior Design;\",Residential ;Commercial ;Interior Design;Institutional ;,\"Residential ;Institutional ;Industrial ;Master planning, regional planning, etc.;Interior Design;Commercial ;\",Residential ;Commercial ;Interior Design;,\"Residential ;Commercial ;Industrial ;Institutional ;Master planning, regional planning, etc.;Interior Design;\",Residential ;Institutional ;Interior Design;,\"Residential;Commercial;Institutional;Interior Design;Master planning, regional planning, etc.;\",Institutional ;Art;,\"Residential ;Commercial ;Institutional ;Interior Design;Master planning, regional planning, etc.;Industrial ;\",\"Residential ;Commercial ;Institutional ;Master planning, regional planning, etc.;Interior Design;\",Residential ;Commercial ;Institutional ;Industrial ;,\"Residential ;Commercial ;Institutional ;Master planning, regional planning, etc.;Interior Design;Landscape architecture;\",Residential ;Commercial ;Institutional ;,Residential ;Commercial ;Institutional ;Interior Design;,\"Residential ;Commercial ;Institutional ;Industrial ;Master planning, regional planning, etc.;Computational design, machine learning AI for architecture;\",Residential ;Commercial ;Institutional ;Industrial ;,\"Residential ;Commercial ;Institutional ;Industrial ;Architectural Interiors;Master planning, regional planning, etc.;\",crew management;,\"Residential ;Commercial ;Institutional ;Master planning, regional planning, etc.;Interior Design;Property Development focusing on Regeneration principles;\",\"Residential ;Commercial ;Institutional ;Industrial ;Interior Design;Master planning, regional planning, etc.;\"\nWhat type of clients do you work with?,Non-profit;Private;,Private;,Non-profit;Private;,Government or Public Sector;Non-profit;Private;,Government or Public Sector;Non-profit;Private;,Government or Public Sector;Non-profit;Private;,Government or Public Sector;Private;,Private;Non-profit;,Private;,Government or Public Sector;Private;Non-profit;,Non-profit;Private;Government or Public Sector;,Government or Public Sector;Non-profit;Private;,Private;Non-profit;,Private;Non-profit;,Government or Public Sector;Private;Religious;,Private;,Government or Public Sector;Non-profit;Private;,Private;,Private;Government or Public Sector;,Private;Government or Public Sector;Non-profit;,Government or Public Sector;Private;Non-profit;,Private;,Private;Government or Public Sector;,Private;,Non-profit;Private;,Private;,Private;,Government or Public Sector;Non-profit;Private;,Government or Public Sector;Non-profit;Private;,Private;,Private;,Government or Public Sector;Non-profit;Private;";
 
-    let panningEnabled = true;
-    let currentTransform = d3.zoomIdentity.translate(width / 2, height / 2).scale(1);
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    const svg = d3.select("#chart").attr("width", width).attr("height", height);
+    const zoomLayer = svg.append("g");
+    const container = zoomLayer.append("g");
 
-    const svg = d3.select("#chart")
-      .attr("width", width)
-      .attr("height", height);
-
-    const container = svg.append("g")
-      .attr("id", "zoom-group")
-      .attr("transform", currentTransform);
-
-    const zoom = d3.zoom()
-      .scaleExtent([0.4, 3])
-      .on("zoom", (event) => {
-        if (!panningEnabled) return;
-        currentTransform = event.transform;
-        container.attr("transform", currentTransform);
+    const zoomBehavior = d3.zoom()
+      .scaleExtent([0.2, 8])
+      .filter(event => !event.target.closest || !event.target.closest("#header-controls, #toggle-controls"))
+      .on("zoom", event => {
+        zoomLayer.attr("transform", event.transform);
       });
 
-    svg.call(zoom);
+    svg.call(zoomBehavior);
+    svg.on("dblclick.zoom", null);
 
-    function fitToScreen() {
-      const bbox = container.node().getBBox();
-      const scale = 0.85 / Math.max(bbox.width / width, bbox.height / height);
-      const x = width / 2 - (bbox.x + bbox.width / 2) * scale;
-      const y = height / 2 - (bbox.y + bbox.height / 2) * scale;
-      currentTransform = d3.zoomIdentity.translate(x, y).scale(scale);
-      svg.transition().duration(750).call(zoom.transform, currentTransform);
+    function resetPanZoom() {
+      svg.interrupt();
+      svg.call(zoomBehavior.transform, d3.zoomIdentity);
     }
 
-    document.getElementById("reset-zoom").addEventListener("click", fitToScreen);
-    document.getElementById("toggle-panning").addEventListener("click", function () {
-      panningEnabled = !panningEnabled;
-      this.textContent = panningEnabled ? "Disable Panning" : "Enable Panning";
+    document.getElementById("reset-zoom").addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      resetPanZoom();
     });
-    document.getElementById("reset-pan").addEventListener("click", () => {
-      const scale = currentTransform.k;
-      currentTransform = d3.zoomIdentity.translate(width / 2, height / 2).scale(scale);
-      svg.transition().duration(500).call(zoom.transform, currentTransform);
+
+    let peopleColorScheme = "purple-lightblue";
+    let answerColorScheme = "dark";
+    let ribbonOffset = 20;
+    let ribbonStrokeWidth = 1.5;
+    let lastData = null;
+    let hiddenPeople = new Set();
+    let selectedElements = new Set();
+    let currentConnectionDetails = {};
+    let currentDetailsByGroup = {};
+
+    const popup = document.getElementById("info-popup");
+    const popupContent = document.getElementById("popup-content");
+    popup.querySelector(".close-popup").addEventListener("click", () => hidePopup());
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") hidePopup();
     });
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function positionPopup(event) {
+      const padding = 12;
+      const popupWidth = popup.offsetWidth || 360;
+      const popupHeight = popup.offsetHeight || 220;
+      let left = event.clientX + padding;
+      let top = event.clientY + padding;
+      if (left + popupWidth > window.innerWidth - padding) left = event.clientX - popupWidth - padding;
+      if (top + popupHeight > window.innerHeight - padding) top = event.clientY - popupHeight - padding;
+      popup.style.left = Math.max(padding, left) + "px";
+      popup.style.top = Math.max(padding, top) + "px";
+    }
+
+    function showPopup(event, html) {
+      popupContent.innerHTML = html;
+      popup.style.display = "block";
+      positionPopup(event);
+    }
+
+    function hidePopup() {
+      popup.style.display = "none";
+    }
+
+    function ribbonDetailKey(ribbonData) {
+      const source = ribbonData.source.index;
+      const target = ribbonData.target.index;
+      return `${Math.min(source, target)}|${Math.max(source, target)}`;
+    }
 
     document.getElementById("toggle-controls").addEventListener("click", () => {
       const panel = document.getElementById("header-controls");
-      panel.style.display = panel.style.display === "block" ? "none" : "block";
+      panel.style.display = (panel.style.display === "block") ? "none" : "block";
     });
 
-    document.getElementById('csv-file').addEventListener('change', function(e) {
+    document.getElementById("apply-style").addEventListener("click", () => {
+      peopleColorScheme = document.getElementById("people-colors").value;
+      answerColorScheme = document.getElementById("answer-colors").value;
+      ribbonOffset = +document.getElementById("ribbon-offset").value;
+      ribbonStrokeWidth = +document.getElementById("ribbon-width").value;
+      if (lastData) processData(lastData);
+    });
+
+    function setStatus(msg) {
+      document.getElementById("status").textContent = msg;
+    }
+
+    function loadCsvText(csvText) {
+      try {
+        const csvData = d3.csvParse(csvText);
+        lastData = csvData;
+        hiddenPeople.clear();
+        buildPeopleCheckboxes(csvData.columns.slice(1));
+        processData(csvData);
+      } catch (err) {
+        console.error(err);
+        setStatus("Parse error");
+      }
+    }
+
+    document.getElementById("csv-file").addEventListener("change", function(e) {
       const file = e.target.files[0];
       if (!file) return;
-      document.getElementById("status").textContent = "Loading file...";
+      setStatus("Loading...");
       const reader = new FileReader();
       reader.onload = function(e) {
-        try {
-          const csvData = d3.csvParse(e.target.result);
-          processTransposedData(csvData);
-        } catch (error) {
-          document.getElementById("status").textContent = "Error parsing CSV";
-        }
+        loadCsvText(e.target.result);
       };
       reader.readAsText(file);
     });
 
-    function processTransposedData(rawData) {
+    function buildPeopleCheckboxes(people) {
+      const containerDiv = document.getElementById("people-checkboxes");
+      containerDiv.innerHTML = "<strong>Show/Hide People:</strong><br/>";
+      people.forEach(person => {
+        const label = document.createElement("label");
+        label.style.display = "block";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !hiddenPeople.has(person);
+        cb.value = person;
+        cb.addEventListener("change", () => {
+          if (cb.checked) hiddenPeople.delete(person);
+          else hiddenPeople.add(person);
+          if (lastData) processData(lastData);
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(" " + person));
+        containerDiv.appendChild(label);
+      });
+    }
+
+    // Export SVG
+    document.getElementById("export-svg").addEventListener("click", () => {
+      const serializer = new XMLSerializer();
+      let source = serializer.serializeToString(svg.node());
+      if (!source.match(/^<svg[^>]+xmlns="http:\/\/www.w3.org\/2000\/svg"/)) {
+        source = source.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+      if (!source.match(/^<svg[^>]+"http:\/\/www.w3.org\/1999\/xlink"/)) {
+        source = source.replace(/^<svg/, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+      }
+      const blob = new Blob([`<?xml version="1.0" standalone="no"?>\n${source}`], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "chord-diagram.svg";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    });
+
+    // Export PNG
+    document.getElementById("export-png").addEventListener("click", () => {
+      const serializer = new XMLSerializer();
+      const source = serializer.serializeToString(svg.node());
+      const svgBlob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(svgBlob);
+
+      const img = new Image();
+      img.onload = function() {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "white"; // white background
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, width, height);
+        URL.revokeObjectURL(url);
+
+        const pngUrl = canvas.toDataURL("image/png");
+        const link = document.createElement("a");
+        link.download = "chord-diagram.png";
+        link.href = pngUrl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+      img.src = url;
+    });
+
+    const palettes = {
+      people: {
+        "purple-lightblue": d3.interpolateRgb("#6a1b9a", "#6baed6"),
+        "orange-yellow": d3.interpolateRgb("#e6550d", "#ffd92f"),
+        "blue-green": d3.interpolateRgb("#08519c", "#31a354")
+      },
+      answers: {
+        "dark": d3.interpolateRgb("#252525", "#636363"),
+        "pastel": d3.interpolateRgb("#fbb4ae", "#ccebc5"),
+        "contrast": d3.interpolateRgb("#e41a1c", "#377eb8")
+      }
+    };
+
+    document.getElementById("clear-selection").addEventListener("click", () => {
+      selectedElements.clear();
+      hidePopup();
+      if (currentRibbons && currentGroupPaths && currentGroupTexts) {
+        currentRibbons.style("opacity", 0.7);
+        currentGroupPaths.style("opacity", 1);
+        currentGroupTexts.style("opacity", 1);
+      }
+    });
+
+    let currentRibbons = null;
+    let currentGroupPaths = null;
+    let currentGroupTexts = null;
+    let resizeTimer = null;
+
+    function resizeChart() {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      svg.attr("width", width).attr("height", height);
+      resetPanZoom();
+      if (lastData) processData(lastData);
+    }
+
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(resizeChart, 120);
+    });
+
+
+    function updateSelectionList() {
+      const list = document.getElementById("selection-list");
+      if (!list) return;
+
+      if (!selectedElements || selectedElements.size === 0) {
+        list.innerHTML = "No selections yet.";
+        return;
+      }
+
+      const items = [];
+      selectedElements.forEach(sel => {
+        if (sel.source && sel.target) {
+          const personIndex = sel.source.index < peopleGlobal.length ? sel.source.index : sel.target.index;
+          const answerIndex = sel.source.index >= peopleGlobal.length ? sel.source.index : sel.target.index;
+          const person = peopleGlobal[personIndex] || "Unknown person";
+          const answer = answersGlobal[answerIndex - peopleGlobal.length] || "Unknown answer";
+          items.push(`<div style="margin-bottom:6px;"><strong>${escapeHtml(person)}</strong><br/>${escapeHtml(answer)}</div>`);
+        } else if (sel.index !== undefined) {
+          if (sel.index < peopleGlobal.length) {
+            items.push(`<div style="margin-bottom:6px;"><strong>Person:</strong> ${escapeHtml(peopleGlobal[sel.index])}</div>`);
+          } else {
+            items.push(`<div style="margin-bottom:6px;"><strong>Answer:</strong> ${escapeHtml(answersGlobal[sel.index - peopleGlobal.length])}</div>`);
+          }
+        }
+      });
+
+      list.innerHTML = items.join("");
+    }
+
+    let peopleGlobal = [];
+    let answersGlobal = [];
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function processData(rawData) {
       container.selectAll("*").remove();
-      document.getElementById("status").textContent = "Processing data...";
+      selectedElements.clear();
+      hidePopup();
+      currentConnectionDetails = {};
+      currentDetailsByGroup = {};
 
       const people = rawData.columns.slice(1);
       const answers = [];
       const answerIndexMap = {};
+      const answerMeta = [];
 
       rawData.forEach(row => {
         const question = row[rawData.columns[0]];
         people.forEach(person => {
           const answer = row[person];
           if (answer && answer.trim() !== "") {
-            const fullAnswer = `${question}: ${answer}`;
-            if (!answerIndexMap[fullAnswer]) {
-              answerIndexMap[fullAnswer] = answers.length;
-              answers.push(fullAnswer);
-            }
+            const parts = answer.split(/[:;]+/);
+            parts.forEach(part => {
+              const clean = part.trim();
+              if (clean !== "") {
+                const key = `${question}:${clean.toLowerCase()}`;
+                if (answerIndexMap[key] === undefined) {
+                  answerIndexMap[key] = answers.length;
+                  answers.push(`${question}: ${clean}`);
+                  answerMeta.push({ question, answer: clean });
+                }
+              }
+            });
           }
         });
       });
@@ -178,123 +443,248 @@
       rawData.forEach(row => {
         const question = row[rawData.columns[0]];
         people.forEach((person, i) => {
+          if (hiddenPeople.has(person)) return;
           const answer = row[person];
           if (answer && answer.trim() !== "") {
-            const fullAnswer = `${question}: ${answer}`;
-            connections.push([i, answerIndexMap[fullAnswer], 1]);
+            const parts = answer.split(/[:;]+/);
+            parts.forEach(part => {
+              const clean = part.trim();
+              if (clean !== "") {
+                const key = `${question}:${clean.toLowerCase()}`;
+                const answerIdx = answerIndexMap[key];
+                if (answerIdx !== undefined) {
+                  connections.push({ personIndex: i, answerIndex: answerIdx, person, question, answer: clean });
+                }
+              }
+            });
           }
         });
       });
 
-      const spacer = [""];
-      const allGroups = [...people, ...spacer, ...answers];
-      const matrixSize = allGroups.length;
+      const matrixSize = people.length + answers.length;
       const matrix = Array(matrixSize).fill().map(() => Array(matrixSize).fill(0));
-      const answerOffset = people.length + spacer.length;
+      connections.forEach(({ personIndex, answerIndex, person, question, answer }) => {
+        const ai = people.length + answerIndex;
+        matrix[personIndex][ai] += 1;
+        matrix[ai][personIndex] += 1;
 
-      connections.forEach(([personIdx, answerIdx, strength]) => {
-        const targetIdx = answerOffset + answerIdx;
-        matrix[personIdx][targetIdx] = strength;
-        matrix[targetIdx][personIdx] = strength;
+        const key = `${Math.min(personIndex, ai)}|${Math.max(personIndex, ai)}`;
+        if (!currentConnectionDetails[key]) currentConnectionDetails[key] = [];
+        currentConnectionDetails[key].push({ person, question, answer });
+
+        if (!currentDetailsByGroup[personIndex]) currentDetailsByGroup[personIndex] = [];
+        currentDetailsByGroup[personIndex].push({ person, question, answer });
+
+        if (!currentDetailsByGroup[ai]) currentDetailsByGroup[ai] = [];
+        currentDetailsByGroup[ai].push({ person, question, answer });
       });
 
-      createChordDiagram(allGroups, matrix, people.length, answerOffset);
-      fitToScreen();
-      document.getElementById("status").textContent =
-        `Showing ${people.length} people connected to ${answers.length} answers`;
+      drawChordDynamic(people, answers, answerMeta, matrix);
+      setStatus(`Rendering ${people.length} people × ${answers.length} answers`);
     }
 
-    function createChordDiagram(groups, matrix, peopleLength, answerOffset) {
-      const chord = d3.chord().padAngle(0.03).sortSubgroups(d3.descending);
+    function drawChordDynamic(people, answers, answerMeta, matrix) {
+      const outerRadius = Math.max(80, Math.min(width, height) / 2 - 100);
+      const innerRadius = Math.max(50, outerRadius - 15);
+
+      const chord = d3.chord().padAngle(0.02).sortSubgroups(d3.descending);
       const chords = chord(matrix);
+
       const arc = d3.arc().innerRadius(innerRadius).outerRadius(outerRadius);
-      const ribbon = d3.ribbon().radius(innerRadius - 20); // ← gap added
+      const ribbon = d3.ribbon().radius(innerRadius - ribbonOffset);
 
-      const interpolate = d3.interpolateRgb.gamma(2.2);
-      const peopleColor = (i) => {
-        const t = i / Math.max(1, peopleLength - 1);
-        return t < 0.5
-          ? interpolate("blue", "gold")(t * 2)
-          : interpolate("gold", "red")((t - 0.5) * 2);
-      };
+      const peopleColor = (i) => palettes.people[peopleColorScheme](i / Math.max(1, people.length - 1));
+      const answerColor = (i) => palettes.answers[answerColorScheme](i / Math.max(1, answers.length - 1));
+      const color = (i) => (i < people.length ? peopleColor(i) : answerColor(i - people.length));
 
-      const answerColor = (i) => {
-        const t = i / Math.max(1, groups.length - answerOffset - 1);
-        const bright = t < 0.5
-          ? d3.hsl(interpolate("blue", "gold")(t * 2))
-          : d3.hsl(interpolate("gold", "red")((t - 0.5) * 2));
-        bright.l *= 0.45;
-        return bright.toString();
-      };
+      function formatRibbonPopup(d) {
+        const details = currentConnectionDetails[ribbonDetailKey(d)] || [];
+        if (!details.length) return "<h2>No detail found</h2>";
+        const first = details[0];
+        const items = details.map(detail => `
+          <li>
+            <div><strong>Question</strong> ${escapeHtml(detail.question)}</div>
+            <div><strong>Answer</strong> ${escapeHtml(detail.answer)}</div>
+          </li>
+        `).join("");
+        return `
+          <h2>${escapeHtml(first.person)}</h2>
+          <div class="detail"><strong>Selected connection</strong></div>
+          <ul>${items}</ul>
+        `;
+      }
 
-      const color = (i) => {
-        if (i < peopleLength) return peopleColor(i);
-        if (i >= answerOffset) return answerColor(i - answerOffset);
-        return "transparent";
-      };
+      function formatGroupPopup(g) {
+        const details = currentDetailsByGroup[g.index] || [];
+        if (g.index < people.length) {
+          const person = people[g.index];
+          if (!details.length) return `<h2>${escapeHtml(person)}</h2><div class="detail">No visible answers.</div>`;
+          const items = details.slice(0, 80).map(detail => `
+            <li>
+              <div><strong>Question</strong> ${escapeHtml(detail.question)}</div>
+              <div><strong>Answer</strong> ${escapeHtml(detail.answer)}</div>
+            </li>
+          `).join("");
+          const more = details.length > 80 ? `<div class="detail">Showing first 80 of ${details.length} answers.</div>` : "";
+          return `<h2>${escapeHtml(person)}</h2><div class="detail"><strong>All visible answers for this person</strong></div><ul>${items}</ul>${more}`;
+        }
 
-      const group = container.append("g")
-        .selectAll("g")
-        .data(chords.groups)
-        .join("g");
+        const meta = answerMeta[g.index - people.length];
+        const peopleList = [...new Set(details.map(detail => detail.person))].sort();
+        const items = peopleList.slice(0, 120).map(person => `<li>${escapeHtml(person)}</li>`).join("");
+        const more = peopleList.length > 120 ? `<div class="detail">Showing first 120 of ${peopleList.length} people.</div>` : "";
+        return `
+          <h2>${escapeHtml(meta ? meta.answer : answers[g.index - people.length])}</h2>
+          <div class="detail"><strong>Question</strong> ${escapeHtml(meta ? meta.question : "")}</div>
+          <div class="detail"><strong>People with this answer</strong></div>
+          <ul>${items || "<li>No visible people.</li>"}</ul>${more}
+        `;
+      }
 
-      group.append("path")
+      const group = container.append("g").selectAll("g").data(chords.groups).join("g");
+      const groupPaths = group.append("path")
         .attr("d", arc)
-        .attr("fill", d => color(d.index));
+        .attr("fill", d => (d.index < people.length && hiddenPeople.has(people[d.index])) ? "transparent" : color(d.index));
 
-      group.append("text")
+      const groupTexts = group.append("text")
         .attr("dy", ".35em")
-        .attr("transform", function(d) {
+        .attr("transform", d => {
           const angle = (d.startAngle + d.endAngle) / 2;
-          return `
-            rotate(${angle * 180 / Math.PI - 90})
-            translate(${outerRadius + 20})
-            rotate(${angle > Math.PI ? 180 : 0})
-          `;
+          return `rotate(${angle * 180 / Math.PI - 90}) translate(${outerRadius + 20}) ${angle > Math.PI ? "rotate(180)" : ""}`;
         })
-        .attr("text-anchor", d => ((d.startAngle + d.endAngle) / 2 > Math.PI ? "end" : "start"))
+        .attr("text-anchor", d => ((d.startAngle + d.endAngle) / 2 > Math.PI) ? "end" : "start")
         .text(d => {
-          const label = groups[d.index];
-          if (label === "") return "";
-          if (d.index < peopleLength) return label;
-          return (label.split(":")[1] || label).trim();
+          if (d.index < people.length && hiddenPeople.has(people[d.index])) return "";
+          if (d.index < people.length) return people[d.index];
+          const label = answers[d.index - people.length];
+          const short = (label.split(":")[1] || label).trim();
+          return short.length > 25 ? short.slice(0, 25) + "…" : short;
         })
-        .style("font-size", "7px")
-        .style("font-weight", d => d.index < peopleLength ? "bold" : "normal")
-        .style("fill", "black") // ← black labels
-        .style("opacity", d => groups[d.index] === "" ? 0 : 1);
+        .style("font-size", (people.length + answers.length > 300) ? "7px" : "9px");
 
-      const ribbons = container.append("g")
-        .selectAll("path")
-        .data(chords)
-        .join("path")
+      const ribbons = container.append("g").selectAll("path").data(chords).join("path")
         .attr("d", ribbon)
-        .attr("fill", d => color(d.source.index))
-        .attr("stroke", d => d3.color(color(d.source.index)).darker(0.5))
+        .attr("fill", "none")
+        .attr("stroke", d => color(d.source.index))
+        .attr("stroke-width", ribbonStrokeWidth)
         .style("opacity", 0.7);
 
-      let selectedChord = null;
-      ribbons.on("click", function(event, clickedChord) {
-        selectedChord = selectedChord === clickedChord ? null : clickedChord;
-        ribbons.style("opacity", d => !selectedChord || d === clickedChord ? 1 : 0.05);
+      currentRibbons = ribbons;
+      currentGroupPaths = groupPaths;
+      currentGroupTexts = groupTexts;
+
+      function updateHighlights() {
+        updateSelectionList();
+        if (selectedElements.size === 0) {
+          ribbons.style("opacity", 0.7);
+          groupPaths.style("opacity", 1);
+          groupTexts.style("opacity", 1);
+          return;
+        }
+
+        ribbons.style("opacity", r => {
+          if (selectedElements.has(r)) return 1;
+          for (let sel of selectedElements) {
+            if (sel.index !== undefined) {
+              if (r.source.index === sel.index || r.target.index === sel.index) return 1;
+            }
+          }
+          return 0.05;
+        });
+
+        groupPaths.style("opacity", g => {
+          if (selectedElements.has(g)) return 1;
+          for (let sel of selectedElements) {
+            if (sel.source) {
+              if (sel.source.index === g.index || sel.target.index === g.index) return 1;
+            }
+            if (sel.index !== undefined && sel.index === g.index) return 1;
+          }
+          return 0.2;
+        });
+        groupTexts.style("opacity", g => {
+          if (selectedElements.has(g)) return 1;
+          for (let sel of selectedElements) {
+            if (sel.source) {
+              if (sel.source.index === g.index || sel.target.index === g.index) return 1;
+            }
+            if (sel.index !== undefined && sel.index === g.index) return 1;
+          }
+          return 0.2;
+        });
+      }
+
+      ribbons.on("click", function(event, clicked) {
+        event.stopPropagation();
+        if (selectedElements.has(clicked)) selectedElements.delete(clicked);
+        else selectedElements.add(clicked);
+        updateHighlights();
+        showPopup(event, formatRibbonPopup(clicked));
+      });
+
+      group.on("click", function(event, clickedGroup) {
+        event.stopPropagation();
+        if (selectedElements.has(clickedGroup)) selectedElements.delete(clickedGroup);
+        else selectedElements.add(clickedGroup);
+        updateHighlights();
+        showPopup(event, formatGroupPopup(clickedGroup));
       });
 
       ribbons.on("mouseover", function(event, d) {
-        const source = groups[d.source.index];
-        const target = groups[d.target.index];
-        d3.select(".tooltip")
-          .html(`<strong>Connection:</strong><br>${source}<br>↔<br>${target}`)
-          .style("opacity", 1)
-          .style("left", (event.pageX + 10) + "px")
-          .style("top", (event.pageY - 28) + "px");
-        d3.select(this).style("opacity", 1);
+        if (selectedElements.size === 0) {
+          ribbons.style("opacity", o => (o === d ? 1 : 0.05));
+          groupPaths.style("opacity", g =>
+            g.index === d.source.index || g.index === d.target.index ? 1 : 0.2
+          );
+          groupTexts.style("opacity", g =>
+            g.index === d.source.index || g.index === d.target.index ? 1 : 0.2
+          );
+        }
       }).on("mouseout", function() {
-        d3.select(".tooltip").style("opacity", 0);
-        if (selectedChord !== this.__data__) {
-          d3.select(this).style("opacity", 0.7);
+        if (selectedElements.size === 0) {
+          ribbons.style("opacity", 0.7);
+          groupPaths.style("opacity", 1);
+          groupTexts.style("opacity", 1);
         }
       });
+
+      const bbox = container.node().getBBox();
+      const scale = Math.min(width / Math.max(1, bbox.width), height / Math.max(1, bbox.height)) * 0.9;
+      container.attr("transform",
+        `translate(${width/2 - (bbox.x + bbox.width/2) * scale},${height/2 - (bbox.y + bbox.height/2) * scale}) scale(${scale})`
+      );
     }
-  </script>
+
+    // Load the embedded CSV immediately when the page opens.
+    loadCsvText(embeddedCsv);
+  
+      // Reset diagram when clicking empty background
+      svg.on("click", function(event) {
+        const target = event.target;
+
+        // Ignore clicks on ribbons, arcs, labels, controls
+        if (
+          target.tagName === "path" ||
+          target.tagName === "text" ||
+          target.closest("#header-controls") ||
+          target.closest("#toggle-controls")
+        ) {
+          return;
+        }
+
+        selectedElements.clear();
+        updateSelectionList();
+        resetPanZoom();
+
+        if (currentRibbons && currentGroupPaths && currentGroupTexts) {
+          currentRibbons.style("opacity", 0.7);
+          currentGroupPaths.style("opacity", 1);
+          currentGroupTexts.style("opacity", 1);
+        }
+
+        hidePopup();
+      });
+
+</script>
 </body>
 </html>
